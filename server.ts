@@ -42,6 +42,19 @@ app.get('/api/health', (_req, res) => {
   });
 });
 
+import { paymentRepository } from './src/server/storage/googleSheetsRepository';
+
+// Readiness middleware — on Vercel cold starts, wait for Google Sheets to load
+// before serving any data API so routes never return empty results
+app.use('/api', async (_req, res, next) => {
+  try {
+    await paymentRepository.waitUntilReady();
+    next();
+  } catch {
+    next(); // still proceed even if sheets fail (seed data will be used)
+  }
+});
+
 // Mount API modules FIRST before Vite
 app.use('/api/auth', authRouter);
 app.use('/api/interbank-transfers', interbankRouter);
@@ -52,6 +65,7 @@ app.use('/api/purchase-fms', purchaseFMSRoutes);
 app.use('/api/files', fileRouter);
 app.use('/api/reports', reportRouter);
 app.use('/api', systemRouter);
+
 
 // Centralized Error Handling
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

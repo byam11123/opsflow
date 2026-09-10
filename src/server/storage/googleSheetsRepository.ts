@@ -64,13 +64,23 @@ export class GoogleSheetsPaymentRepository implements PaymentRepository {
   public liveAuditCount: number = 0;
   public liveITChecklistCount: number = 0;
 
+  // Tracks when the initial Google Sheets load is complete
+  private readyPromise: Promise<void>;
+
   constructor() {
     this.initializeData();
     this.initializePurchasePipeline();
     // Ingest all real records from connected Google Sheets in read-only mode
-    this.loadFromLiveGoogleSheets().catch((err) => {
-      console.warn('[Live Sync Initial Error]:', err?.message || err);
-    });
+    this.readyPromise = this.loadFromLiveGoogleSheets()
+      .then(() => {})
+      .catch((err) => {
+        console.warn('[Live Sync Initial Error]:', err?.message || err);
+      });
+  }
+
+  /** Await this before serving data to ensure initial Google Sheets load is complete */
+  async waitUntilReady(): Promise<void> {
+    return this.readyPromise;
   }
 
   /**
@@ -2294,7 +2304,10 @@ export class GoogleSheetsPaymentRepository implements PaymentRepository {
 
   private initializePurchasePipeline(): void {
     try {
-      const dataPath = path.resolve(process.cwd(), 'src/server/storage/seedPurchaseFMS.json');
+      const __filename_pfms = fileURLToPath(import.meta.url);
+      const __dirname_pfms = path.dirname(__filename_pfms);
+      const dataPath = path.join(__dirname_pfms, 'seedPurchaseFMS.json');
+
       if (!fs.existsSync(dataPath)) return;
 
       const fileData = JSON.parse(fs.readFileSync(dataPath, 'utf8'));
