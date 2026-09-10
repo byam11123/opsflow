@@ -14,74 +14,79 @@ import { systemRouter } from './src/server/routes/systemRoutes';
 import { itChecklistRouter } from './src/server/routes/itChecklistRoutes';
 import purchaseFMSRoutes from './src/server/routes/purchaseFMSRoutes';
 
-async function startServer() {
-  const app = express();
-  const PORT = 3000;
+export const app = express();
+const PORT = process.env.PORT || 3000;
 
-  // JSON and URL-encoded body parsers
-  app.use(express.json({ limit: '15mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '15mb' }));
+// JSON and URL-encoded body parsers
+app.use(express.json({ limit: '15mb' }));
+app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 
-  // Basic security and request timing header
-  app.use((req, res, next) => {
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
-    res.setHeader('X-XSS-Protection', '1; mode=block');
-    next();
+// Basic security and request timing header
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-user-id');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  next();
+});
+
+// Health check endpoint
+app.get('/api/health', (_req, res) => {
+  res.json({
+    status: 'ok',
+    service: 'OpsFlow 360 – Payment Process Management Module',
+    timestamp: new Date().toISOString(),
+    version: '1.0.0',
   });
+});
 
-  // Health check endpoint
-  app.get('/api/health', (_req, res) => {
-    res.json({
-      status: 'ok',
-      service: 'OpsFlow 360 – Payment Process Management Module',
-      timestamp: new Date().toISOString(),
-      version: '1.0.0',
-    });
+// Mount API modules FIRST before Vite
+app.use('/api/auth', authRouter);
+app.use('/api/interbank-transfers', interbankRouter);
+app.use('/api/beneficiaries', beneficiaryRouter);
+app.use('/api/vendor-payments', vendorPaymentRouter);
+app.use('/api/it-checklist', itChecklistRouter);
+app.use('/api/purchase-fms', purchaseFMSRoutes);
+app.use('/api/files', fileRouter);
+app.use('/api/reports', reportRouter);
+app.use('/api', systemRouter);
+
+// Centralized Error Handling
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error('[OpsFlow 360 Error]', err);
+  res.status(err.status || 500).json({
+    success: false,
+    error: {
+      code: err.code || 'INTERNAL_SERVER_ERROR',
+      message: err.message || 'An unexpected error occurred processing your payment request.',
+      fields: err.fields || [],
+    },
   });
+});
 
-  // Mount API modules FIRST before Vite
-  app.use('/api/auth', authRouter);
-  app.use('/api/interbank-transfers', interbankRouter);
-  app.use('/api/beneficiaries', beneficiaryRouter);
-  app.use('/api/vendor-payments', vendorPaymentRouter);
-  app.use('/api/it-checklist', itChecklistRouter);
-  app.use('/api/purchase-fms', purchaseFMSRoutes);
-  app.use('/api/files', fileRouter);
-  app.use('/api/reports', reportRouter);
-  app.use('/api', systemRouter);
-
-  // Centralized Error Handling
-  app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-    console.error('[OpsFlow 360 Error]', err);
-    res.status(err.status || 500).json({
-      success: false,
-      error: {
-        code: err.code || 'INTERNAL_SERVER_ERROR',
-        message: err.message || 'An unexpected error occurred processing your payment request.',
-        fields: err.fields || [],
-      },
-    });
-  });
-
-  // Vite Middleware for client frontend
-  if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
+// Vite Middleware for client frontend - ONLY in development, skipping if deployed
+if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+  import('vite').then(({ createServer: createViteServer }) => {
+    createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
+    }).then(vite => {
+      app.use(vite.middlewares);
+      app.listen(PORT, () => {
+        console.log(`[OpsFlow 360] Server active on http://localhost:${PORT}`);
+      });
     });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (_req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
-  }
-
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[OpsFlow 360] Server active on http://localhost:${PORT}`);
+  });
+} else if (!process.env.VERCEL) {
+  // Production server (local build run)
+  const distPath = path.join(process.cwd(), 'dist');
+  app.use(express.static(distPath));
+  app.get('*', (_req, res) => {
+    res.sendFile(path.join(distPath, 'index.html'));
+  });
+  app.listen(PORT, () => {
+    console.log(`[OpsFlow 360] Production server active on http://localhost:${PORT}`);
   });
 }
-
-startServer();
